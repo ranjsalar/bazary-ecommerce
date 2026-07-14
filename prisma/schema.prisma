@@ -1,0 +1,194 @@
+// Prisma schema — PostgreSQL (local dev via docker-compose, see docker-compose.yml).
+//
+// NOTE: role / order status remain validated strings (see src/lib/constants.ts)
+// rather than native enums — kept from the original SQLite schema; converting to
+// Postgres enums is optional future work. All money values are integer IQD.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  phone         String?
+  passwordHash  String
+  role          String    @default("CUSTOMER") // CUSTOMER | ADMIN
+  emailVerified DateTime?
+  phoneVerified DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  orders    Order[]
+  addresses Address[]
+  tokens    AuthToken[]
+}
+
+// Single table for verification codes and password-reset tokens.
+model AuthToken {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String // VERIFY_EMAIL | VERIFY_PHONE | PASSWORD_RESET
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+}
+
+// One-time codes sent to a WhatsApp number to confirm checkout. Keyed by
+// phone (not user) so guest checkout is covered too.
+model OrderOtp {
+  id         String    @id @default(cuid())
+  phone      String // normalized +9647XXXXXXXXX
+  codeHash   String // sha256 of the 6-digit code
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  verifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([phone, createdAt])
+}
+
+// Store-wide key/value settings managed from the admin dashboard.
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model Address {
+  id        String   @id @default(cuid())
+  userId    String
+  label     String   @default("Home")
+  city      String
+  district  String
+  landmark  String?
+  notes     String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Category {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  slug      String   @unique
+  image     String?
+  createdAt DateTime @default(now())
+
+  products Product[]
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String
+  price       Int // IQD
+  compareAt   Int? // optional "was" price in IQD for sale display
+  stock       Int      @default(0)
+  featured    Boolean  @default(false)
+  active      Boolean  @default(true)
+  categoryId  String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  category   Category       @relation(fields: [categoryId], references: [id])
+  images     ProductImage[]
+  variants   ProductVariant[]
+  orderItems OrderItem[]
+
+  @@index([categoryId])
+  @@index([active, featured])
+}
+
+model ProductImage {
+  id        String @id @default(cuid())
+  productId String
+  url       String
+  alt       String?
+  sort      Int    @default(0)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
+
+model ProductVariant {
+  id        String  @id @default(cuid())
+  productId String
+  name      String // e.g. "Size" value "XL", or "Color: Red"
+  priceDiff Int     @default(0) // IQD added to base price
+  stock     Int     @default(0)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
+
+model DeliveryFee {
+  id        String   @id @default(cuid())
+  city      String   @unique
+  fee       Int // IQD
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Order {
+  id          String   @id @default(cuid())
+  orderNumber Int      @unique // assigned sequentially in app code (SQLite can't autoincrement non-id fields)
+  userId      String?
+  status      String   @default("PENDING") // PENDING | CONFIRMED | SHIPPED | DELIVERED | CANCELLED
+
+  // customer / delivery details captured at checkout
+  fullName  String
+  whatsapp  String // +964XXXXXXXXXX
+  city      String
+  district  String
+  landmark  String?
+  addressNotes String?
+  orderNotes   String?
+
+  subtotal    Int // IQD, items only
+  deliveryFee Int // IQD, snapshot of fee at time of order
+  total       Int // IQD
+
+  paymentMethod String @default("COD") // structured so a gateway can be added later
+  paymentStatus String @default("UNPAID") // UNPAID | PAID | REFUNDED
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user  User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  items OrderItem[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  productId String?
+  // snapshots so history survives product edits/deletes
+  name      String
+  variant   String?
+  unitPrice Int // IQD
+  quantity  Int
+  image     String?
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+}

@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres
+    container_name: bazary-postgres
+    environment:
+      POSTGRES_PASSWORD: devpassword
+      POSTGRES_DB: bazary
+    ports:
+      # host 5433 — a native PostgreSQL service on this machine already owns 5432
+      - "5433:5432"
+    volumes:
+      # postgres 18+ expects the mount at /var/lib/postgresql (not .../data)
+      - bazary_pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d bazary"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  bazary_pgdata:
