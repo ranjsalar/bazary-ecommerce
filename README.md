@@ -156,3 +156,4 @@ src/
 - **Image uploads** go to `public/uploads/` (dev-friendly). For production, swap the
   storage inside `src/app/api/admin/upload/route.ts` for S3/R2 — the `{ url }` response
   contract stays the same.
+
